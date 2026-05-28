@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Layout } from './components/layout/Layout'
 import { LandingPage } from './pages/LandingPage'
@@ -8,9 +9,15 @@ import { ConfirmationPage } from './pages/ConfirmationPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { ProviderDashboard } from './pages/provider/ProviderDashboard'
 import { AuthPage } from './pages/AuthPage'
+import { useAuthStore } from './store/authStore'
+import { ToastProvider } from './components/ui/Toast'
 
 export default function App() {
+  const init = useAuthStore((s) => s.init)
+  useEffect(() => { init() }, [])
+
   return (
+    <ToastProvider>
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
@@ -25,5 +32,6 @@ export default function App() {
         </Route>
       </Routes>
     </BrowserRouter>
+    </ToastProvider>
   )
 }

@@ -1,34 +1,36 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { SlidersHorizontal, X, SearchX } from 'lucide-react'
+import { SlidersHorizontal, X, SearchX, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { PROVIDERS, CATEGORIES } from '../data/mock'
+import { CATEGORIES } from '../data/mock'
 import { ProviderCard } from '../components/ui/ProviderCard'
 import { Button } from '../components/ui/Button'
 import { useFilterStore } from '../store/bookingStore'
+import { useAsync } from '../hooks/useAsync'
+import { listProviders } from '../lib/api'
+import type { ServiceCategory } from '../lib/database.types'
 
 export function SearchPage() {
   const [params] = useSearchParams()
   const { category, query, priceMax, ratingMin, setCategory, setQuery, setPriceMax, setRatingMin, reset } =
     useFilterStore()
 
+  // Sync URL → filter store on every URL change. Clear filter when param absent.
   useEffect(() => {
-    const cat = params.get('category')
-    const q = params.get('q')
-    if (cat) setCategory(cat)
-    if (q) setQuery(q)
-  }, [params])
+    setCategory(params.get('category'))
+    setQuery(params.get('q') ?? '')
+  }, [params.toString()])
 
-  const results = useMemo(() => {
-    return PROVIDERS.filter((p) => {
-      if (category && p.category !== category) return false
-      if (query && !p.name.toLowerCase().includes(query.toLowerCase()) &&
-          !p.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))) return false
-      if (priceMax && p.priceFrom > priceMax) return false
-      if (ratingMin && p.rating < ratingMin) return false
-      return true
-    })
-  }, [category, query, priceMax, ratingMin])
+  const { data: resultsRaw, loading } = useAsync(
+    () => listProviders({
+      category: (category as ServiceCategory) ?? null,
+      query: query || undefined,
+      priceMax,
+      ratingMin,
+    }),
+    [category, query, priceMax, ratingMin],
+  )
+  const results = resultsRaw ?? []
 
   const activeFilters = [
     category && CATEGORIES.find((c) => c.id === category)?.label,
@@ -163,7 +165,12 @@ export function SearchPage() {
           </div>
 
           <AnimatePresence mode="wait">
-            {results.length === 0 ? (
+            {loading ? (
+              <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20 text-gray-400">
+                <Loader2 className="w-8 h-8 mx-auto animate-spin text-brand-500" />
+                <p className="text-sm mt-3">Ładowanie...</p>
+              </motion.div>
+            ) : results.length === 0 ? (
               <motion.div
                 key="empty"
                 initial={{ opacity: 0 }}

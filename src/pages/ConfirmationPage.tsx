@@ -3,18 +3,22 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { CheckCircle, Calendar, Clock, ArrowRight } from 'lucide-react'
 import { useBookingStore } from '../store/bookingStore'
-import { PROVIDERS } from '../data/mock'
+import { useAsync } from '../hooks/useAsync'
+import { getProvider } from '../lib/api'
 import { Button } from '../components/ui/Button'
 
 export function ConfirmationPage() {
   const navigate = useNavigate()
   const { providerId, serviceId, date, time, addons, reset } = useBookingStore()
 
-  const provider = PROVIDERS.find((p) => p.id === providerId)
+  const { data: provider } = useAsync(
+    () => (providerId ? getProvider(providerId) : Promise.resolve(null)),
+    [providerId],
+  )
   const service = provider?.services.find((s) => s.id === serviceId)
 
   useEffect(() => {
-    if (!provider || !service) {
+    if (!providerId || !serviceId) {
       navigate('/', { replace: true })
       return
     }
@@ -37,9 +41,9 @@ export function ConfirmationPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Rezerwacja potwierdzona!</h1>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Zgłoszenie wysłane!</h1>
         <p className="text-gray-500 mb-8">
-          Wysłaliśmy potwierdzenie na Twój e-mail. Do zobaczenia!
+          Czekamy na potwierdzenie od salonu. Powiadomimy Cię e-mailem gdy tylko zatwierdzą termin.
         </p>
 
         <div className="bg-white rounded-2xl p-6 card-shadow text-left mb-6">
@@ -62,7 +66,7 @@ export function ConfirmationPage() {
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-700">
               <Clock className="w-4 h-4 text-brand-600" />
-              <span>{time} · {service?.duration} min</span>
+              <span>{time} · {service?.duration_min} min</span>
             </div>
             {addons.length > 0 && (
               <div className="text-sm text-gray-500 pl-6">

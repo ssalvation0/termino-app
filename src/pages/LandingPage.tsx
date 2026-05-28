@@ -2,15 +2,18 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Search, ArrowRight, Shield, Zap, Star, Clock, ChevronRight } from 'lucide-react'
-import { CATEGORIES, PROVIDERS } from '../data/mock'
+import { CATEGORIES } from '../data/mock'
 import { ProviderCard } from '../components/ui/ProviderCard'
 import { Button } from '../components/ui/Button'
+import { useAsync } from '../hooks/useAsync'
+import { listProviders } from '../lib/api'
 
 export function LandingPage() {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
 
-  const featured = PROVIDERS.filter((p) => p.verified).slice(0, 3)
+  const { data: providers } = useAsync(() => listProviders({ ratingMin: 4.5 }), [])
+  const featured = (providers ?? []).filter((p) => p.verified).slice(0, 3)
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()

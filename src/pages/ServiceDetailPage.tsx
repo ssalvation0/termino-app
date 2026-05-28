@@ -1,15 +1,18 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { MapPin, Clock, BadgeCheck, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react'
-import { PROVIDERS } from '../data/mock'
+import { MapPin, Clock, BadgeCheck, ChevronLeft, ChevronRight, ArrowRight, Loader2 } from 'lucide-react'
 import { StarRating } from '../components/ui/StarRating'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
+import { ProviderMap } from '../components/ui/ProviderMap'
 import { useBookingStore } from '../store/bookingStore'
+import { useAsync } from '../hooks/useAsync'
+import { getProvider } from '../lib/api'
+import type { WorkingDay } from '../lib/database.types'
 
 const DAYS = ['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Nd']
-const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 
 function formatDuration(min: number) {
   if (min < 60) return `${min} min`
@@ -21,10 +24,18 @@ function formatDuration(min: number) {
 export function ServiceDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const provider = PROVIDERS.find((p) => p.id === id)
+  const { data: provider, loading } = useAsync(() => (id ? getProvider(id) : Promise.resolve(null)), [id])
   const [imgIdx, setImgIdx] = useState(0)
   const [selectedService, setSelectedService] = useState<string | null>(null)
   const { setProvider, setService } = useBookingStore()
+
+  if (loading) {
+    return (
+      <div className="text-center py-32 text-gray-400">
+        <Loader2 className="w-8 h-8 mx-auto animate-spin text-brand-500" />
+      </div>
+    )
+  }
 
   if (!provider) {
     return (
@@ -103,7 +114,7 @@ export function ServiceDetailPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-3 text-sm text-gray-500">
-                  <StarRating rating={provider.rating} count={provider.reviewCount} />
+                  <StarRating rating={provider.rating} count={provider.review_count} />
                   <span className="flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5" />
                     {provider.address}, {provider.city}
@@ -112,7 +123,7 @@ export function ServiceDetailPage() {
               </div>
               <div className="text-right">
                 <div className="text-sm text-gray-400">od</div>
-                <div className="text-2xl font-bold text-brand-600">{provider.priceFrom} zł</div>
+                <div className="text-2xl font-bold text-brand-600">{Number(provider.priceFrom)} zł</div>
               </div>
             </div>
 
@@ -149,7 +160,7 @@ export function ServiceDetailPage() {
                     <p className="text-sm text-gray-500">{svc.description}</p>
                     <div className="flex items-center gap-1 text-xs text-gray-400 mt-1">
                       <Clock className="w-3 h-3" />
-                      {formatDuration(svc.duration)}
+                      {formatDuration(svc.duration_min)}
                     </div>
                   </div>
                   <div className="font-bold text-gray-900 whitespace-nowrap">{svc.price} zł</div>
@@ -158,12 +169,30 @@ export function ServiceDetailPage() {
             </div>
           </div>
 
+          {/* Mapa */}
+          {provider.lat && provider.lng && (
+            <div className="bg-white rounded-2xl p-6 card-shadow">
+              <h2 className="font-bold text-xl text-gray-900 mb-4">Lokalizacja</h2>
+              <p className="text-sm text-gray-500 mb-4 flex items-center gap-1.5">
+                <MapPin className="w-4 h-4" />
+                {provider.address}, {provider.city}
+              </p>
+              <ProviderMap
+                lat={Number(provider.lat)}
+                lng={Number(provider.lng)}
+                name={provider.name}
+                address={provider.address}
+                className="h-72 w-full"
+              />
+            </div>
+          )}
+
           {/* Godziny pracy */}
           <div className="bg-white rounded-2xl p-6 card-shadow">
             <h2 className="font-bold text-xl text-gray-900 mb-4">Godziny pracy</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {DAY_KEYS.map((key, i) => {
-                const hours = provider.workingHours[key]
+                const hours = provider.working_hours[key] as WorkingDay | null
                 return (
                   <div key={key} className={`flex justify-between text-sm px-3 py-2 rounded-lg ${!hours ? 'text-gray-300' : 'text-gray-700'} ${i % 2 === 0 ? 'bg-gray-50' : ''}`}>
                     <span className="font-medium">{DAYS[i]}</span>
@@ -194,7 +223,7 @@ export function ServiceDetailPage() {
                 >
                   <div>
                     <div className="font-medium text-gray-900">{svc.name}</div>
-                    <div className="text-gray-400 text-xs mt-0.5">{formatDuration(svc.duration)}</div>
+                    <div className="text-gray-400 text-xs mt-0.5">{formatDuration(svc.duration_min)}</div>
                   </div>
                   <span className="font-bold text-gray-900 ml-2">{svc.price} zł</span>
                 </button>

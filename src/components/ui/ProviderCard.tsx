@@ -1,12 +1,12 @@
 import { MapPin, Clock, BadgeCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import type { Provider } from '../../types'
+import type { ProviderWithServices } from '../../lib/api'
 import { StarRating } from './StarRating'
 import { Badge } from './Badge'
 
 interface ProviderCardProps {
-  provider: Provider
+  provider: ProviderWithServices
   index?: number
 }
 
@@ -44,7 +44,7 @@ export function ProviderCard({ provider, index = 0 }: ProviderCardProps) {
             <h3 className="font-semibold text-gray-900 text-base leading-tight group-hover:text-brand-600 transition-colors">
               {provider.name}
             </h3>
-            <StarRating rating={provider.rating} count={provider.reviewCount} />
+            <StarRating rating={provider.rating} count={provider.review_count} />
           </div>
 
           <div className="flex items-center gap-1 text-gray-500 text-sm mb-3">

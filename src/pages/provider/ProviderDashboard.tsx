@@ -1,10 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, BarChart3, TrendingUp, Clock, CheckCircle, AlertCircle } from 'lucide-react'
-import { PROVIDER_BOOKINGS } from '../../data/mock'
+import { LayoutDashboard, Calendar, BarChart3, TrendingUp, Clock, CheckCircle, AlertCircle, Loader2, Building2 } from 'lucide-react'
 import { StatusBadge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
+import { useToast } from '../../components/ui/Toast'
 import { clsx } from 'clsx'
+import { useAuthStore } from '../../store/authStore'
+import { useAsync } from '../../hooks/useAsync'
+import { getMyProviders, listProviderBookings, updateBookingStatus } from '../../lib/api'
+import type { BookingWithJoins } from '../../lib/api'
+import { supabase } from '../../lib/supabase'
 
 type Tab = 'overview' | 'calendar' | 'bookings' | 'analytics'
 
@@ -16,65 +22,85 @@ const TABS: { key: Tab; icon: typeof LayoutDashboard; label: string }[] = [
 ]
 
 const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00']
-const TODAY_EVENTS = [
-  { time: '10:00', end: '11:00', name: 'Anna Kowalska', service: 'Strzyżenie damskie', color: 'bg-brand-100 border-brand-400 text-brand-800' },
-  { time: '12:00', end: '16:00', name: 'Maria Nowak', service: 'Balayage', color: 'bg-amber-100 border-amber-400 text-amber-800' },
-]
 
-function CalendarView() {
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })
+}
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString('pl-PL', { day: '2-digit', month: 'short' })
+}
+function isSameDay(iso: string, ref: Date) {
+  const d = new Date(iso)
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate()
+}
+
+function CalendarView({ bookings }: { bookings: BookingWithJoins[] }) {
+  const today = new Date()
+  const todays = bookings.filter((b) => isSameDay(b.starts_at, today))
   return (
     <div className="bg-white rounded-2xl p-6 card-shadow">
       <div className="flex items-center justify-between mb-5">
-        <h3 className="font-bold text-lg text-gray-900">Dzisiaj — środa, 23 kwi</h3>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm">‹ Wczoraj</Button>
-          <Button variant="secondary" size="sm">Jutro ›</Button>
-        </div>
+        <h3 className="font-bold text-lg text-gray-900">
+          Dzisiaj — {today.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })}
+        </h3>
       </div>
       <div className="relative">
         {HOURS.map((h) => {
-          const event = TODAY_EVENTS.find((e) => e.time === h)
+          const event = todays.find((b) => formatTime(b.starts_at) === h)
           return (
             <div key={h} className="flex gap-3 min-h-[48px] border-t border-gray-100">
               <div className="w-14 text-xs text-gray-400 pt-1 flex-shrink-0">{h}</div>
               <div className="flex-1 py-1">
                 {event && (
-                  <div className={clsx('text-xs font-medium px-3 py-2 rounded-lg border-l-4', event.color)}>
-                    <div className="font-semibold">{event.name}</div>
-                    <div className="opacity-70">{event.service}</div>
+                  <div className="text-xs font-medium px-3 py-2 rounded-lg border-l-4 bg-brand-100 border-brand-400 text-brand-800">
+                    <div className="font-semibold">{event.service.name}</div>
+                    <div className="opacity-70">{event.duration_min} min · {Number(event.total_price)} zł</div>
                   </div>
                 )}
               </div>
             </div>
           )
         })}
+        {todays.length === 0 && (
+          <p className="text-center text-sm text-gray-400 py-8">Brak rezerwacji na dziś</p>
+        )}
       </div>
     </div>
   )
 }
 
-function BookingsTable() {
+function BookingsTable({ bookings, onAction, onToast }: { bookings: BookingWithJoins[]; onAction: () => void; onToast: (msg: string, kind: 'success' | 'error') => void }) {
+  const confirm = async (id: string) => {
+    try { await updateBookingStatus(id, 'confirmed'); onToast('Rezerwacja potwierdzona', 'success'); onAction() }
+    catch (e) { onToast(e instanceof Error ? e.message : 'Błąd', 'error') }
+  }
+  const reject = async (id: string) => {
+    try { await updateBookingStatus(id, 'cancelled'); onToast('Rezerwacja odrzucona', 'success'); onAction() }
+    catch (e) { onToast(e instanceof Error ? e.message : 'Błąd', 'error') }
+  }
+
   return (
     <div className="bg-white rounded-2xl card-shadow overflow-hidden">
       <div className="p-5 border-b border-gray-100 flex justify-between items-center">
-        <h3 className="font-bold text-gray-900">Wszystkie rezerwacje</h3>
-        <Button variant="secondary" size="sm">Eksportuj</Button>
+        <h3 className="font-bold text-gray-900">Wszystkie rezerwacje ({bookings.length})</h3>
       </div>
       <div className="divide-y divide-gray-100">
-        {PROVIDER_BOOKINGS.map((b) => (
-          <div key={b.id} className="flex items-center gap-4 px-5 py-4">
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-gray-900 text-sm">Anna Wiśniewska</div>
-              <div className="text-xs text-gray-500">{b.serviceName}</div>
+        {bookings.length === 0 ? (
+          <p className="text-center text-sm text-gray-400 py-12">Brak rezerwacji</p>
+        ) : bookings.map((b) => (
+          <div key={b.id} className="flex items-center gap-4 px-5 py-4 flex-wrap">
+            <div className="flex-1 min-w-[140px]">
+              <div className="font-medium text-gray-900 text-sm">{b.service.name}</div>
+              <div className="text-xs text-gray-500">{b.duration_min} min</div>
             </div>
-            <div className="text-sm text-gray-600 hidden sm:block">{b.date}</div>
-            <div className="text-sm font-medium text-gray-700 hidden sm:block">{b.time}</div>
+            <div className="text-sm text-gray-600 hidden sm:block">{formatDate(b.starts_at)}</div>
+            <div className="text-sm font-medium text-gray-700 hidden sm:block">{formatTime(b.starts_at)}</div>
             <StatusBadge status={b.status} />
-            <div className="font-bold text-sm text-gray-900">{b.price} zł</div>
+            <div className="font-bold text-sm text-gray-900">{Number(b.total_price)} zł</div>
             {b.status === 'pending' && (
               <div className="flex gap-1">
-                <Button size="sm" className="text-xs px-2 py-1">Potwierdź</Button>
-                <Button variant="danger" size="sm" className="text-xs px-2 py-1">Odrzuć</Button>
+                <Button size="sm" className="text-xs px-2 py-1" onClick={() => confirm(b.id)}>Potwierdź</Button>
+                <Button variant="danger" size="sm" className="text-xs px-2 py-1" onClick={() => reject(b.id)}>Odrzuć</Button>
               </div>
             )}
           </div>
@@ -84,28 +110,32 @@ function BookingsTable() {
   )
 }
 
-function Analytics() {
-  const weekData = [45, 78, 62, 91, 55, 83, 70]
+function Analytics({ bookings }: { bookings: BookingWithJoins[] }) {
+  const completed = bookings.filter((b) => b.status === 'completed')
+  const revenue = completed.reduce((s, b) => s + Number(b.total_price), 0)
+  const avg = completed.length ? Math.round(revenue / completed.length) : 0
+
   const days = ['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Nd']
-  const max = Math.max(...weekData)
+  const weekData = Array(7).fill(0)
+  const today = new Date()
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today); d.setDate(today.getDate() - i)
+    weekData[6 - i] = bookings.filter((b) => isSameDay(b.starts_at, d)).length
+  }
+  const max = Math.max(...weekData, 1)
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-4">
         {[
-          { label: 'Przychód (kwi)', val: '8 240 zł', trend: '+12%', up: true },
-          { label: 'Rezerwacje (kwi)', val: '64', trend: '+8%', up: true },
-          { label: 'Avg. wartość wizyty', val: '128 zł', trend: '+3%', up: true },
-          { label: 'Ocena', val: '4.9 ★', trend: '0', up: null },
-        ].map(({ label, val, trend, up }) => (
+          { label: 'Przychód (zakończone)', val: `${revenue} zł` },
+          { label: 'Rezerwacji łącznie', val: bookings.length },
+          { label: 'Avg. wartość wizyty', val: `${avg} zł` },
+          { label: 'Zakończonych', val: completed.length },
+        ].map(({ label, val }) => (
           <div key={label} className="bg-white rounded-2xl p-5 card-shadow">
             <div className="text-xs text-gray-400 mb-1">{label}</div>
             <div className="text-2xl font-bold text-gray-900">{val}</div>
-            {up !== null && (
-              <div className={clsx('text-xs font-medium mt-1', up ? 'text-emerald-600' : 'text-red-500')}>
-                <TrendingUp className="inline w-3 h-3 mr-0.5" />{trend} vs poprzedni miesiąc
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -115,10 +145,7 @@ function Analytics() {
         <div className="flex items-end gap-2 h-32">
           {weekData.map((v, i) => (
             <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className="w-full gradient-brand rounded-t-lg transition-all duration-500"
-                style={{ height: `${(v / max) * 100}%` }}
-              />
+              <div className="w-full gradient-brand rounded-t-lg transition-all duration-500" style={{ height: `${(v / max) * 100}%` }} />
               <span className="text-xs text-gray-400">{days[i]}</span>
             </div>
           ))}
@@ -129,17 +156,89 @@ function Analytics() {
 }
 
 export function ProviderDashboard() {
+  const navigate = useNavigate()
+  const toast = useToast()
+  const { session, profile, loading: authLoading } = useAuthStore()
   const [tab, setTab] = useState<Tab>('overview')
 
-  const todayBookings = PROVIDER_BOOKINGS.filter((b) => b.date === '2026-04-23')
-  const pendingCount = PROVIDER_BOOKINGS.filter((b) => b.status === 'pending').length
+  const { data: providersRaw, loading: provLoading } = useAsync(
+    () => (session ? getMyProviders() : Promise.resolve([])),
+    [session?.user.id],
+  )
+  const providers = providersRaw ?? []
+  const provider = providers[0] ?? null
+
+  const { data: bookingsRaw, loading: bookLoading, refetch } = useAsync(
+    () => (provider ? listProviderBookings(provider.id) : Promise.resolve([])),
+    [provider?.id],
+  )
+  const bookings = bookingsRaw ?? []
+
+  // Realtime: subscribe to changes on bookings for this provider
+  useEffect(() => {
+    if (!provider) return
+    const ch = supabase
+      .channel(`provider-bookings-${provider.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings', filter: `provider_id=eq.${provider.id}` },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            toast.show({ kind: 'notification', title: 'Nowa rezerwacja!', body: 'Sprawdź zakładkę "Rezerwacje" aby zatwierdzić.' })
+          } else if (payload.eventType === 'UPDATE') {
+            const oldRow = payload.old as { status?: string }
+            const newRow = payload.new as { status?: string }
+            if (oldRow?.status !== newRow?.status && newRow?.status === 'cancelled') {
+              toast.show({ kind: 'info', title: 'Klient odwołał wizytę' })
+            }
+          }
+          refetch()
+        },
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [provider?.id])
+
+  if (authLoading || provLoading) {
+    return <div className="text-center py-32 text-gray-400"><Loader2 className="w-8 h-8 mx-auto animate-spin text-brand-500" /></div>
+  }
+
+  if (!session || !profile) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20">
+        <AlertCircle className="w-12 h-12 mx-auto text-gray-300 mb-4" />
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Musisz być zalogowany</h2>
+        <Button onClick={() => navigate('/auth')}>Zaloguj się</Button>
+      </div>
+    )
+  }
+
+  if (!provider) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20">
+        <Building2 className="w-12 h-12 mx-auto text-gray-300 mb-4" />
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Nie masz jeszcze firmy</h2>
+        <p className="text-gray-500 mb-6">
+          Załóż profil swojego salonu w Supabase (lub uruchom <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">seed.sql</code>),
+          aby zacząć przyjmować rezerwacje.
+        </p>
+      </div>
+    )
+  }
+
+  const today = new Date()
+  const todayBookings = bookings.filter((b) => isSameDay(b.starts_at, today))
+  const pendingCount = bookings.filter((b) => b.status === 'pending').length
+  const weekRevenue = bookings
+    .filter((b) => b.status === 'completed' && (today.getTime() - new Date(b.starts_at).getTime()) < 7 * 86400000)
+    .reduce((s, b) => s + Number(b.total_price), 0)
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Panel dostawcy</h1>
-          <p className="text-gray-500 text-sm mt-1">Studio Kowalska Hair</p>
+          <p className="text-gray-500 text-sm mt-1">{provider.name}</p>
         </div>
         {pendingCount > 0 && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded-xl text-sm">
@@ -149,7 +248,6 @@ export function ProviderDashboard() {
         )}
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-2xl mb-8 overflow-x-auto">
         {TABS.map(({ key, icon: Icon, label }) => (
           <button
@@ -166,21 +264,15 @@ export function ProviderDashboard() {
         ))}
       </div>
 
-      <motion.div
-        key={tab}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
-      >
+      <motion.div key={tab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
         {tab === 'overview' && (
           <div className="space-y-6">
-            {/* Quick stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 { label: 'Dzisiaj', val: todayBookings.length, icon: <Calendar className="w-5 h-5" />, color: 'text-brand-600 bg-brand-50' },
                 { label: 'Oczekujące', val: pendingCount, icon: <Clock className="w-5 h-5" />, color: 'text-amber-600 bg-amber-50' },
-                { label: 'Potwierdzone', val: PROVIDER_BOOKINGS.filter((b) => b.status === 'confirmed').length, icon: <CheckCircle className="w-5 h-5" />, color: 'text-emerald-600 bg-emerald-50' },
-                { label: 'Przychód (tydzień)', val: '2 160 zł', icon: <TrendingUp className="w-5 h-5" />, color: 'text-purple-600 bg-purple-50' },
+                { label: 'Potwierdzone', val: bookings.filter((b) => b.status === 'confirmed' && new Date(b.starts_at) >= today).length, icon: <CheckCircle className="w-5 h-5" />, color: 'text-emerald-600 bg-emerald-50' },
+                { label: 'Przychód (tydzień)', val: `${weekRevenue} zł`, icon: <TrendingUp className="w-5 h-5" />, color: 'text-purple-600 bg-purple-50' },
               ].map(({ label, val, icon, color }) => (
                 <div key={label} className="bg-white rounded-2xl p-5 card-shadow">
                   <div className={clsx('w-10 h-10 rounded-xl flex items-center justify-center mb-3', color)}>
@@ -193,31 +285,36 @@ export function ProviderDashboard() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <CalendarView />
+              <CalendarView bookings={bookings} />
               <div className="bg-white rounded-2xl p-6 card-shadow">
                 <h3 className="font-bold text-lg text-gray-900 mb-4">Nadchodzące rezerwacje</h3>
-                <div className="space-y-3">
-                  {PROVIDER_BOOKINGS.slice(0, 3).map((b) => (
-                    <div key={b.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
-                      <div className="w-10 h-10 gradient-brand rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                        AW
+                {bookLoading ? (
+                  <Loader2 className="w-6 h-6 mx-auto animate-spin text-brand-500 my-8" />
+                ) : (
+                  <div className="space-y-3">
+                    {bookings.filter((b) => new Date(b.starts_at) >= today).slice(0, 5).map((b) => (
+                      <div key={b.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                        <div className="w-10 h-10 gradient-brand rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                          {b.service.name[0]}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-900">{b.service.name}</div>
+                          <div className="text-xs text-gray-400">{formatDate(b.starts_at)} {formatTime(b.starts_at)}</div>
+                        </div>
+                        <StatusBadge status={b.status} />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-gray-900">Anna Wiśniewska</div>
-                        <div className="text-xs text-gray-400">{b.serviceName} · {b.date} {b.time}</div>
-                      </div>
-                      <StatusBadge status={b.status} />
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                    {bookings.length === 0 && <p className="text-center text-sm text-gray-400 py-4">Brak rezerwacji</p>}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {tab === 'calendar' && <CalendarView />}
-        {tab === 'bookings' && <BookingsTable />}
-        {tab === 'analytics' && <Analytics />}
+        {tab === 'calendar' && <CalendarView bookings={bookings} />}
+        {tab === 'bookings' && <BookingsTable bookings={bookings} onAction={refetch} onToast={(msg, kind) => toast.show({ kind, title: msg })} />}
+        {tab === 'analytics' && <Analytics bookings={bookings} />}
       </motion.div>
     </div>
   )

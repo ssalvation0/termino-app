@@ -1,12 +1,12 @@
 import { create } from 'zustand'
-import type { Addon } from '../types'
+import type { AddonRow } from '../lib/database.types'
 
 interface BookingState {
   providerId: string | null
   serviceId: string | null
   date: string | null
   time: string | null
-  addons: Addon[]
+  addons: AddonRow[]
   guestMode: boolean
   step: number
 
@@ -14,7 +14,7 @@ interface BookingState {
   setService: (id: string) => void
   setDate: (date: string) => void
   setTime: (time: string) => void
-  toggleAddon: (addon: Addon) => void
+  toggleAddon: (addon: AddonRow) => void
   setGuestMode: (v: boolean) => void
   setStep: (step: number) => void
   reset: () => void
@@ -43,20 +43,6 @@ export const useBookingStore = create<BookingState>((set) => ({
   setStep: (step) => set({ step }),
   reset: () =>
     set({ providerId: null, serviceId: null, date: null, time: null, addons: [], step: 1 }),
-}))
-
-interface AuthState {
-  isLoggedIn: boolean
-  role: 'client' | 'provider' | null
-  login: (role: 'client' | 'provider') => void
-  logout: () => void
-}
-
-export const useAuthStore = create<AuthState>((set) => ({
-  isLoggedIn: false,
-  role: null,
-  login: (role) => set({ isLoggedIn: true, role }),
-  logout: () => set({ isLoggedIn: false, role: null }),
 }))
 
 interface FilterState {

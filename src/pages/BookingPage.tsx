@@ -1,11 +1,15 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, ChevronLeft, Clock, CreditCard, User, Calendar } from 'lucide-react'
-import { PROVIDERS, TIME_SLOTS } from '../data/mock'
+import { Check, ChevronLeft, Clock, CreditCard, User, Calendar, Loader2 } from 'lucide-react'
+import { TIME_SLOTS } from '../data/mock'
 import { useBookingStore } from '../store/bookingStore'
+import { useAuthStore } from '../store/authStore'
 import { Button } from '../components/ui/Button'
+import { useToast } from '../components/ui/Toast'
 import { clsx } from 'clsx'
+import { useAsync } from '../hooks/useAsync'
+import { getProvider, getBookedTimes, createBooking } from '../lib/api'
 
 const STEPS = ['Data', 'Godzina', 'Dodatki', 'Dane', 'Płatność']
 
@@ -29,34 +33,119 @@ export function BookingPage() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const provider = PROVIDERS.find((p) => p.id === id)
 
-  const { date, time, addons, step, setDate, setTime, toggleAddon, setStep } = useBookingStore()
+  const toast = useToast()
+  const { data: provider, loading } = useAsync(() => (id ? getProvider(id) : Promise.resolve(null)), [id])
+  const { session, profile } = useAuthStore()
+
+  const { date, time, addons, step, setDate, setTime, toggleAddon, setStep, setProvider, setService, reset } = useBookingStore()
+
+  // B5: reset booking store ONCE when this booking flow starts (avoid carrying
+  // old addons from a previous booking). Tracked by a ref so StrictMode's
+  // double-effect and unrelated re-renders don't trigger another reset that
+  // would clobber the step/date/time the user has already selected.
+  const didResetRef = useRef<string | null>(null)
+  const resetKey = `${id}|${searchParams.get('service') ?? ''}`
+  useEffect(() => {
+    if (didResetRef.current !== resetKey) {
+      didResetRef.current = resetKey
+      reset()
+    }
+  }, [resetKey])
 
   const [guestName, setGuestName] = useState('')
   const [guestPhone, setGuestPhone] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
   const [paying, setPaying] = useState(false)
+  const [bookError, setBookError] = useState<string | null>(null)
 
   const serviceId = searchParams.get('service') ?? provider?.services[0]?.id
   const service = provider?.services.find((s) => s.id === serviceId)
 
+  // sync to store so confirmation page can read it
+  useEffect(() => {
+    if (provider) setProvider(provider.id)
+    if (serviceId) setService(serviceId)
+  }, [provider?.id, serviceId])
+
+  // prefill from session
+  useEffect(() => {
+    if (profile && !guestName) setGuestName(profile.name)
+    if (session?.user.email && !guestEmail) setGuestEmail(session.user.email)
+    if (profile?.phone && !guestPhone) setGuestPhone(profile.phone)
+  }, [profile, session])
+
   const dates = useMemo(() => generateDates(), [])
 
-  const availableSlots = useMemo(() => {
-    return TIME_SLOTS.map((t, i) => ({ time: t, available: i % 3 !== 0 }))
-  }, [date])
+  // real availability from DB
+  const { data: bookedRaw } = useAsync(
+    () => (provider && date ? getBookedTimes(provider.id, date) : Promise.resolve([])),
+    [provider?.id, date],
+  )
+  const bookedTimes = bookedRaw ?? []
 
-  const totalPrice = (service?.price ?? 0) + addons.reduce((sum, a) => sum + a.price, 0)
+  // B3: respect provider working hours for the selected date
+  const workingHoursForDate = useMemo(() => {
+    if (!provider || !date) return null
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+    const d = new Date(`${date}T00:00:00`)
+    const key = dayKeys[d.getDay()]
+    return (provider.working_hours as any)?.[key] as { open: string; close: string } | null
+  }, [provider, date])
+
+  const availableSlots = useMemo(() => {
+    return TIME_SLOTS.map((t) => {
+      if (!workingHoursForDate) return { time: t, available: false }
+      const inHours = t >= workingHoursForDate.open && t < workingHoursForDate.close
+      return { time: t, available: inHours && !bookedTimes.includes(t) }
+    })
+  }, [bookedTimes, workingHoursForDate])
+
+  const totalPrice = Number(service?.price ?? 0) + addons.reduce((sum, a) => sum + Number(a.price), 0)
+
+  if (loading) {
+    return (
+      <div className="text-center py-32 text-gray-400">
+        <Loader2 className="w-8 h-8 mx-auto animate-spin text-brand-500" />
+      </div>
+    )
+  }
 
   if (!provider || !service) {
     return <div className="text-center py-20 text-gray-400">Nie znaleziono usługi</div>
   }
 
   const handlePay = async () => {
+    if (!session) {
+      navigate(`/auth?mode=login&next=${encodeURIComponent(window.location.pathname + window.location.search)}`)
+      return
+    }
+    if (!date || !time) {
+      setBookError('Wybierz datę i godzinę przed płatnością.')
+      setStep(date ? 2 : 1)
+      return
+    }
     setPaying(true)
-    await new Promise((r) => setTimeout(r, 1800))
-    navigate('/confirmation')
+    setBookError(null)
+    try {
+      const startsAt = new Date(`${date}T${time}:00`)
+      await createBooking({
+        providerId: provider.id,
+        serviceId: service.id,
+        startsAt,
+        durationMin: service.duration_min,
+        totalPrice,
+        addonIds: addons.map((a) => a.id),
+      })
+      toast.show({ kind: 'success', title: 'Zgłoszenie wysłane!', body: 'Czekamy na potwierdzenie od salonu.' })
+      navigate('/confirmation')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Nie udało się zarezerwować.'
+      setBookError(msg)
+      toast.show({ kind: 'error', title: 'Błąd rezerwacji', body: msg })
+    } finally {
+      setPaying(false)
+    }
   }
 
   const canNext = () => {
@@ -115,13 +204,12 @@ export function BookingPage() {
       </div>
 
       {/* Step content */}
-      <AnimatePresence mode="wait">
+      <AnimatePresence initial={false}>
         <motion.div
           key={step}
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.25 }}
+          transition={{ duration: 0.2 }}
           className="bg-white rounded-2xl p-6 card-shadow mb-6"
         >
           {/* Step 1 — Data */}
@@ -159,7 +247,7 @@ export function BookingPage() {
             <div>
               <h2 className="font-bold text-xl text-gray-900 mb-5">
                 Wybierz godzinę
-                <span className="text-sm font-normal text-gray-400 ml-2">· {service.duration} min</span>
+                <span className="text-sm font-normal text-gray-400 ml-2">· {service.duration_min} min</span>
               </h2>
               <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
                 {availableSlots.map(({ time: t, available }) => (
@@ -308,8 +396,14 @@ export function BookingPage() {
                 />
               </div>
 
+              {bookError && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 mb-3">
+                  <span>{bookError}</span>
+                </div>
+              )}
+
               <Button fullWidth size="lg" onClick={handlePay} loading={paying}>
-                {paying ? 'Przetwarzanie...' : `Zapłać ${totalPrice} zł`}
+                {paying ? 'Przetwarzanie...' : session ? `Zapłać ${totalPrice} zł` : 'Zaloguj się aby zarezerwować'}
               </Button>
             </div>
           )}
