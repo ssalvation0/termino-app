@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { SlidersHorizontal, X, SearchX, Loader2 } from 'lucide-react'
+import { SlidersHorizontal, X, SearchX, Loader2, AlertCircle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CATEGORIES } from '../data/mock'
 import { ProviderCard } from '../components/ui/ProviderCard'
@@ -15,13 +15,24 @@ export function SearchPage() {
   const { category, query, priceMax, ratingMin, setCategory, setQuery, setPriceMax, setRatingMin, reset } =
     useFilterStore()
 
+  // Local input state, debounced into the store so we don't hit the DB
+  // on every keystroke.
+  const [queryInput, setQueryInput] = useState(query)
+
   // Sync URL → filter store on every URL change. Clear filter when param absent.
   useEffect(() => {
     setCategory(params.get('category'))
     setQuery(params.get('q') ?? '')
+    setQueryInput(params.get('q') ?? '')
   }, [params.toString()])
 
-  const { data: resultsRaw, loading } = useAsync(
+  useEffect(() => {
+    if (queryInput === query) return
+    const t = setTimeout(() => setQuery(queryInput), 350)
+    return () => clearTimeout(t)
+  }, [queryInput])
+
+  const { data: resultsRaw, loading, error, refetch } = useAsync(
     () => listProviders({
       category: (category as ServiceCategory) ?? null,
       query: query || undefined,
@@ -63,8 +74,8 @@ export function SearchPage() {
               <input
                 type="text"
                 placeholder="Nazwa lub usługa..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                value={queryInput}
+                onChange={(e) => setQueryInput(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 text-gray-800"
               />
             </div>
@@ -169,6 +180,15 @@ export function SearchPage() {
               <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20 text-gray-400">
                 <Loader2 className="w-8 h-8 mx-auto animate-spin text-brand-500" />
                 <p className="text-sm mt-3">Ładowanie...</p>
+              </motion.div>
+            ) : error ? (
+              <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20 text-gray-400">
+                <AlertCircle className="w-14 h-14 mx-auto mb-4 text-red-300" strokeWidth={1.5} />
+                <p className="text-lg font-medium text-gray-600">Coś poszło nie tak</p>
+                <p className="text-sm mt-1">Nie udało się załadować wyników. Sprawdź połączenie.</p>
+                <Button variant="secondary" className="mt-4" onClick={refetch}>
+                  Spróbuj ponownie
+                </Button>
               </motion.div>
             ) : results.length === 0 ? (
               <motion.div

@@ -1,14 +1,15 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Calendar, Clock, X, Loader2, AlertCircle, Pencil, Camera, Check } from 'lucide-react'
+import { Calendar, Clock, X, Loader2, AlertCircle, Pencil, Camera, Check, Star } from 'lucide-react'
 import { StatusBadge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import type { BookingStatus } from '../lib/database.types'
 import { clsx } from 'clsx'
 import { useAuthStore } from '../store/authStore'
 import { useAsync } from '../hooks/useAsync'
-import { listMyBookings, updateBookingStatus, updateProfile, uploadAvatar } from '../lib/api'
+import { listMyBookings, updateBookingStatus, updateProfile, uploadAvatar, createReview } from '../lib/api'
+import type { BookingWithJoins } from '../lib/api'
 import { useToast } from '../components/ui/Toast'
 
 const TABS: { key: BookingStatus | 'all'; label: string }[] = [
@@ -25,6 +26,73 @@ function formatDate(iso: string) {
 }
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })
+}
+
+// Inline "rate your visit" form for completed, not-yet-reviewed bookings
+function ReviewForm({ booking, onDone }: { booking: BookingWithJoins; onDone: () => void }) {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [rating, setRating] = useState(0)
+  const [hover, setHover] = useState(0)
+  const [comment, setComment] = useState('')
+  const [sending, setSending] = useState(false)
+
+  const submit = async () => {
+    if (rating === 0) {
+      toast.show({ kind: 'error', title: 'Wybierz ocenę (1–5 gwiazdek)' })
+      return
+    }
+    setSending(true)
+    try {
+      await createReview({ bookingId: booking.id, providerId: booking.provider.id, rating, comment })
+      toast.show({ kind: 'success', title: 'Dziękujemy za opinię!' })
+      onDone()
+    } catch (e) {
+      toast.show({ kind: 'error', title: 'Nie udało się dodać opinii', body: e instanceof Error ? e.message : '' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button variant="secondary" size="sm" className="gap-1" onClick={() => setOpen(true)}>
+        <Star className="w-3.5 h-3.5" /> Oceń wizytę
+      </Button>
+    )
+  }
+
+  return (
+    <div className="w-full mt-3 p-4 bg-brand-50/50 border border-brand-100 rounded-xl">
+      <div className="flex items-center gap-1 mb-3">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            onClick={() => setRating(n)}
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            className="p-0.5"
+          >
+            <Star className={clsx(
+              'w-6 h-6 transition-colors',
+              n <= (hover || rating) ? 'text-amber-400 fill-amber-400' : 'text-gray-300',
+            )} />
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Podziel się wrażeniami (opcjonalnie)"
+        rows={2}
+        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 text-gray-800 mb-3"
+      />
+      <div className="flex gap-2 justify-end">
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={sending}>Anuluj</Button>
+        <Button size="sm" onClick={submit} loading={sending}>Wyślij opinię</Button>
+      </div>
+    </div>
+  )
 }
 
 export function ProfilePage() {
@@ -275,7 +343,7 @@ export function ProfilePage() {
                       <Clock className="w-3.5 h-3.5" /> {formatTime(booking.starts_at)} · {booking.duration_min} min
                     </span>
                   </div>
-                  <div className="flex items-center justify-between mt-4">
+                  <div className="flex items-center justify-between mt-4 flex-wrap gap-2">
                     <span className="font-bold text-gray-900">{Number(booking.total_price)} zł</span>
                     {(booking.status === 'confirmed' || booking.status === 'pending') && (
                       <div className="flex gap-2">
@@ -283,6 +351,16 @@ export function ProfilePage() {
                           <X className="w-3.5 h-3.5" /> Anuluj
                         </Button>
                       </div>
+                    )}
+                    {booking.status === 'completed' && (
+                      (booking.reviews?.length ?? 0) > 0 ? (
+                        <span className="flex items-center gap-1 text-sm text-gray-400">
+                          <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                          Oceniono na {booking.reviews![0].rating}/5
+                        </span>
+                      ) : (
+                        <ReviewForm booking={booking} onDone={refetch} />
+                      )
                     )}
                   </div>
                 </div>

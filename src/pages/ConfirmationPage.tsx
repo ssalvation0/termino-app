@@ -12,7 +12,7 @@ export function ConfirmationPage() {
   // Snapshot booking data at mount: the store is reset right after, and under
   // StrictMode effects run twice, so rendering live store state would wipe the
   // page (reset-in-cleanup cleared everything before the second effect run).
-  const [{ providerId, serviceId, date, time, addons }] = useState(() => useBookingStore.getState())
+  const [{ providerId, serviceId, date, time, addons }] = useState(useBookingStore.getState)
 
   const { data: provider } = useAsync(
     () => (providerId ? getProvider(providerId) : Promise.resolve(null)),

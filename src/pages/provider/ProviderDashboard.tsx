@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, BarChart3, TrendingUp, Clock, CheckCircle, AlertCircle, Loader2, Building2, Settings } from 'lucide-react'
+import { LayoutDashboard, Calendar, BarChart3, TrendingUp, Clock, CheckCircle, AlertCircle, Loader2, Building2, Settings, ChevronLeft, ChevronRight } from 'lucide-react'
 import { StatusBadge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { useToast } from '../../components/ui/Toast'
@@ -10,7 +10,7 @@ import { useAuthStore } from '../../store/authStore'
 import { useAsync } from '../../hooks/useAsync'
 import { getMyProviders, listProviderBookings, updateBookingStatus } from '../../lib/api'
 import type { BookingWithJoins } from '../../lib/api'
-import { FirmSettings } from './FirmSettings'
+import { FirmSettings, CreateFirmForm } from './FirmSettings'
 import { supabase } from '../../lib/supabase'
 
 type Tab = 'overview' | 'calendar' | 'bookings' | 'analytics' | 'firm'
@@ -22,8 +22,6 @@ const TABS: { key: Tab; icon: typeof LayoutDashboard; label: string }[] = [
   { key: 'analytics', icon: BarChart3, label: 'Analityka' },
   { key: 'firm', icon: Settings, label: 'Firma' },
 ]
-
-const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00']
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })
@@ -37,34 +35,63 @@ function isSameDay(iso: string, ref: Date) {
 }
 
 function CalendarView({ bookings }: { bookings: BookingWithJoins[] }) {
-  const today = new Date()
-  const todays = bookings.filter((b) => isSameDay(b.starts_at, today))
+  const [offset, setOffset] = useState(0)
+  const day = new Date()
+  day.setDate(day.getDate() + offset)
+  const isToday = offset === 0
+
+  const days = bookings
+    .filter((b) => isSameDay(b.starts_at, day) && b.status !== 'cancelled')
+    .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+
+  // 09–18 by default, extended when bookings fall outside that range
+  let startH = 9, endH = 18
+  for (const b of days) {
+    const s = new Date(b.starts_at)
+    startH = Math.min(startH, s.getHours())
+    endH = Math.max(endH, Math.ceil((s.getHours() * 60 + s.getMinutes() + b.duration_min) / 60))
+  }
+  const hours = Array.from({ length: endH - startH + 1 }, (_, i) => startH + i)
+
   return (
     <div className="bg-white rounded-2xl p-6 card-shadow">
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-5 gap-2">
         <h3 className="font-bold text-lg text-gray-900">
-          Dzisiaj — {today.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })}
+          {isToday ? 'Dzisiaj' : day.toLocaleDateString('pl-PL', { weekday: 'long' })} — {day.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long' })}
         </h3>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setOffset((o) => o - 1)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500" aria-label="Poprzedni dzień">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          {!isToday && (
+            <button onClick={() => setOffset(0)} className="px-2 py-1 rounded-lg hover:bg-gray-100 text-xs text-gray-500">
+              Dziś
+            </button>
+          )}
+          <button onClick={() => setOffset((o) => o + 1)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500" aria-label="Następny dzień">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
       <div className="relative">
-        {HOURS.map((h) => {
-          const event = todays.find((b) => formatTime(b.starts_at) === h)
+        {hours.map((h) => {
+          const events = days.filter((b) => new Date(b.starts_at).getHours() === h)
           return (
             <div key={h} className="flex gap-3 min-h-[48px] border-t border-gray-100">
-              <div className="w-14 text-xs text-gray-400 pt-1 flex-shrink-0">{h}</div>
-              <div className="flex-1 py-1">
-                {event && (
-                  <div className="text-xs font-medium px-3 py-2 rounded-lg border-l-4 bg-brand-100 border-brand-400 text-brand-800">
-                    <div className="font-semibold">{event.service.name}</div>
+              <div className="w-14 text-xs text-gray-400 pt-1 flex-shrink-0">{String(h).padStart(2, '0')}:00</div>
+              <div className="flex-1 py-1 space-y-1">
+                {events.map((event) => (
+                  <div key={event.id} className="text-xs font-medium px-3 py-2 rounded-lg border-l-4 bg-brand-100 border-brand-400 text-brand-800">
+                    <div className="font-semibold">{formatTime(event.starts_at)} · {event.service.name}</div>
                     <div className="opacity-70">{event.duration_min} min · {Number(event.total_price)} zł</div>
                   </div>
-                )}
+                ))}
               </div>
             </div>
           )
         })}
-        {todays.length === 0 && (
-          <p className="text-center text-sm text-gray-400 py-8">Brak rezerwacji na dziś</p>
+        {days.length === 0 && (
+          <p className="text-center text-sm text-gray-400 py-8">Brak rezerwacji {isToday ? 'na dziś' : 'w tym dniu'}</p>
         )}
       </div>
     </div>
@@ -78,6 +105,10 @@ function BookingsTable({ bookings, onAction, onToast }: { bookings: BookingWithJ
   }
   const reject = async (id: string) => {
     try { await updateBookingStatus(id, 'cancelled'); onToast('Rezerwacja odrzucona', 'success'); onAction() }
+    catch (e) { onToast(e instanceof Error ? e.message : 'Błąd', 'error') }
+  }
+  const complete = async (id: string) => {
+    try { await updateBookingStatus(id, 'completed'); onToast('Wizyta zakończona', 'success'); onAction() }
     catch (e) { onToast(e instanceof Error ? e.message : 'Błąd', 'error') }
   }
 
@@ -104,6 +135,14 @@ function BookingsTable({ bookings, onAction, onToast }: { bookings: BookingWithJ
                 <Button size="sm" className="text-xs px-2 py-1" onClick={() => confirm(b.id)}>Potwierdź</Button>
                 <Button variant="danger" size="sm" className="text-xs px-2 py-1" onClick={() => reject(b.id)}>Odrzuć</Button>
               </div>
+            )}
+            {b.status === 'confirmed' && new Date(b.starts_at) <= new Date() && (
+              <Button variant="secondary" size="sm" className="text-xs px-2 py-1" onClick={() => complete(b.id)}>
+                Zakończ
+              </Button>
+            )}
+            {b.notes && (
+              <div className="w-full text-xs text-gray-400 -mt-1">{b.notes}</div>
             )}
           </div>
         ))}
@@ -168,7 +207,8 @@ export function ProviderDashboard() {
     [session?.user.id],
   )
   const providers = providersRaw ?? []
-  const provider = providers[0] ?? null
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
+  const provider = providers.find((p) => p.id === selectedProviderId) ?? providers[0] ?? null
 
   const { data: bookingsRaw, loading: bookLoading, refetch } = useAsync(
     () => (provider ? listProviderBookings(provider.id) : Promise.resolve([])),
@@ -217,13 +257,12 @@ export function ProviderDashboard() {
 
   if (!provider) {
     return (
-      <div className="max-w-md mx-auto text-center py-20">
-        <Building2 className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-        <h2 className="text-xl font-bold text-gray-900 mb-2">Nie masz jeszcze firmy</h2>
-        <p className="text-gray-500 mb-6">
-          Załóż profil swojego salonu w Supabase (lub uruchom <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">seed.sql</code>),
-          aby zacząć przyjmować rezerwacje.
-        </p>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
+        <div className="text-center mb-8">
+          <Building2 className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+          <h2 className="text-xl font-bold text-gray-900">Nie masz jeszcze firmy</h2>
+        </div>
+        <CreateFirmForm onCreated={refetchProviders} />
       </div>
     )
   }
@@ -240,7 +279,17 @@ export function ProviderDashboard() {
       <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Panel dostawcy</h1>
-          <p className="text-gray-500 text-sm mt-1">{provider.name}</p>
+          {providers.length > 1 ? (
+            <select
+              value={provider.id}
+              onChange={(e) => setSelectedProviderId(e.target.value)}
+              className="mt-1 px-2 py-1 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-400"
+            >
+              {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          ) : (
+            <p className="text-gray-500 text-sm mt-1">{provider.name}</p>
+          )}
         </div>
         {pendingCount > 0 && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded-xl text-sm">

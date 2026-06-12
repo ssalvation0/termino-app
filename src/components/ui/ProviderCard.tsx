@@ -10,7 +10,10 @@ interface ProviderCardProps {
   index?: number
 }
 
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+
 export function ProviderCard({ provider, index = 0 }: ProviderCardProps) {
+  const todayHours = provider.working_hours?.[DAY_KEYS[new Date().getDay()]]
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -63,7 +66,7 @@ export function ProviderCard({ provider, index = 0 }: ProviderCardProps) {
           <div className="flex items-center justify-between pt-3 border-t border-gray-100">
             <div className="flex items-center gap-1 text-xs text-gray-400">
               <Clock className="w-3.5 h-3.5" />
-              <span>Dostępny dziś</span>
+              <span>{todayHours ? `Dziś ${todayHours.open}–${todayHours.close}` : 'Dziś zamknięte'}</span>
             </div>
             <span className="text-sm font-bold text-gray-900">
               od <span className="text-brand-600">{provider.priceFrom} zł</span>

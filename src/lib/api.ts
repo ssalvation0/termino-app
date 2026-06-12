@@ -59,6 +59,35 @@ export async function getMyProviders(): Promise<ProviderWithServices[]> {
 }
 
 // ── Provider management (owner only — enforced by RLS) ─────────────────────
+export async function createProvider(input: {
+  name: string
+  category: ServiceCategory
+  description?: string
+  address: string
+  city: string
+  working_hours: WorkingHours
+}): Promise<ProviderRow> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Musisz być zalogowany.')
+  const { data, error } = await (supabase.from('providers') as any)
+    .insert({
+      owner_id: user.id,
+      name: input.name,
+      category: input.category,
+      description: input.description ?? null,
+      address: input.address,
+      city: input.city,
+      images: [],
+      tags: [],
+      verified: false,
+      working_hours: input.working_hours,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data as ProviderRow
+}
+
 export async function updateProvider(
   id: string,
   input: Partial<Pick<ProviderRow, 'name' | 'category' | 'description' | 'address' | 'city' | 'images' | 'tags'> & { working_hours: WorkingHours }>,
@@ -159,12 +188,14 @@ export async function uploadAvatar(file: File): Promise<string> {
 export interface BookingWithJoins extends BookingRow {
   provider: Pick<ProviderRow, 'id' | 'name' | 'images' | 'address'>
   service: Pick<ServiceRow, 'id' | 'name' | 'duration_min' | 'price'>
+  // one-to-one via unique booking_id, but PostgREST embeds it as an array
+  reviews?: { id: string; rating: number }[]
 }
 
 export async function listMyBookings(): Promise<BookingWithJoins[]> {
   const { data, error } = await supabase
     .from('bookings')
-    .select('*, provider:providers(id,name,images,address), service:services(id,name,duration_min,price)')
+    .select('*, provider:providers(id,name,images,address), service:services(id,name,duration_min,price), reviews(id,rating)')
     .order('starts_at', { ascending: false }) as any
   if (error) throw error
   return (data ?? []) as BookingWithJoins[]
@@ -219,9 +250,12 @@ export async function updateBookingStatus(id: string, status: BookingStatus): Pr
 }
 
 // ── Availability ────────────────────────────────────────────────────────────
-// Returns local-time "HH:MM" strings for all booked slots on the given local date.
-export async function getBookedTimes(providerId: string, date: string): Promise<string[]> {
-  // Build a generous UTC window covering the local day (accounting for any TZ)
+export interface BookedInterval { start: number; end: number } // epoch ms
+
+// Returns occupied intervals for the given local date, so the UI can grey out
+// every slot a booking overlaps (not just its start time).
+export async function getBookedIntervals(providerId: string, date: string): Promise<BookedInterval[]> {
+  // Generous UTC window covering the local day (accounting for any TZ)
   const localStart = new Date(`${date}T00:00:00`)
   const localEnd = new Date(`${date}T23:59:59`)
   const { data, error } = await supabase
@@ -233,7 +267,59 @@ export async function getBookedTimes(providerId: string, date: string): Promise<
     .in('status', ['pending', 'confirmed']) as any
   if (error) throw error
   return ((data ?? []) as { starts_at: string; duration_min: number }[]).map((b) => {
-    const d = new Date(b.starts_at)
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    const start = new Date(b.starts_at).getTime()
+    return { start, end: start + b.duration_min * 60_000 }
   })
+}
+
+// ── Reviews ─────────────────────────────────────────────────────────────────
+export interface ReviewWithAuthor {
+  id: string
+  rating: number
+  comment: string | null
+  created_at: string
+  client_id: string
+  authorName: string
+}
+
+export async function listProviderReviews(providerId: string): Promise<ReviewWithAuthor[]> {
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('id, rating, comment, created_at, client_id')
+    .eq('provider_id', providerId)
+    .order('created_at', { ascending: false }) as any
+  if (error) throw error
+  const reviews = (data ?? []) as Omit<ReviewWithAuthor, 'authorName'>[]
+  if (reviews.length === 0) return []
+
+  // Author names come from the public_profiles view (profiles itself is
+  // readable only by its owner). PostgREST can't embed a view, so join here.
+  const ids = [...new Set(reviews.map((r) => r.client_id))]
+  const { data: profiles } = await supabase
+    .from('public_profiles' as any)
+    .select('id, name')
+    .in('id', ids) as any
+  const names = new Map(((profiles ?? []) as { id: string; name: string }[]).map((p) => [p.id, p.name]))
+  return reviews.map((r) => ({ ...r, authorName: names.get(r.client_id) ?? 'Klient' }))
+}
+
+export async function createReview(input: {
+  bookingId: string
+  providerId: string
+  rating: number
+  comment?: string
+}): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Musisz być zalogowany.')
+  const { error } = await (supabase.from('reviews') as any).insert({
+    booking_id: input.bookingId,
+    client_id: user.id,
+    provider_id: input.providerId,
+    rating: input.rating,
+    comment: input.comment?.trim() || null,
+  })
+  if (error) {
+    if (error.code === '23505') throw new Error('Już oceniłeś tę wizytę.')
+    throw error
+  }
 }

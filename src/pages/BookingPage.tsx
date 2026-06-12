@@ -2,14 +2,13 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, ChevronLeft, Clock, CreditCard, User, Calendar, Loader2 } from 'lucide-react'
-import { TIME_SLOTS } from '../data/mock'
 import { useBookingStore } from '../store/bookingStore'
 import { useAuthStore } from '../store/authStore'
 import { Button } from '../components/ui/Button'
 import { useToast } from '../components/ui/Toast'
 import { clsx } from 'clsx'
 import { useAsync } from '../hooks/useAsync'
-import { getProvider, getBookedTimes, createBooking } from '../lib/api'
+import { getProvider, getBookedIntervals, createBooking } from '../lib/api'
 
 const STEPS = ['Data', 'Godzina', 'Dodatki', 'Dane', 'Płatność']
 
@@ -77,12 +76,12 @@ export function BookingPage() {
 
   const dates = useMemo(() => generateDates(), [])
 
-  // real availability from DB
+  // real availability from DB (full intervals, not just start times)
   const { data: bookedRaw } = useAsync(
-    () => (provider && date ? getBookedTimes(provider.id, date) : Promise.resolve([])),
+    () => (provider && date ? getBookedIntervals(provider.id, date) : Promise.resolve([])),
     [provider?.id, date],
   )
-  const bookedTimes = bookedRaw ?? []
+  const booked = bookedRaw ?? []
 
   // B3: respect provider working hours for the selected date
   const workingHoursForDate = useMemo(() => {
@@ -93,13 +92,24 @@ export function BookingPage() {
     return (provider.working_hours as any)?.[key] as { open: string; close: string } | null
   }, [provider, date])
 
+  // Slots generated from working hours (30-min grid). A slot is available when
+  // the whole visit fits before closing, doesn't overlap an existing booking,
+  // and isn't in the past.
   const availableSlots = useMemo(() => {
-    return TIME_SLOTS.map((t) => {
-      if (!workingHoursForDate) return { time: t, available: false }
-      const inHours = t >= workingHoursForDate.open && t < workingHoursForDate.close
-      return { time: t, available: inHours && !bookedTimes.includes(t) }
-    })
-  }, [bookedTimes, workingHoursForDate])
+    if (!workingHoursForDate || !date || !service) return []
+    const dayStart = new Date(`${date}T${workingHoursForDate.open}:00`).getTime()
+    const dayEnd = new Date(`${date}T${workingHoursForDate.close}:00`).getTime()
+    const durationMs = service.duration_min * 60_000
+    const now = Date.now()
+    const slots: { time: string; available: boolean }[] = []
+    for (let t = dayStart; t + durationMs <= dayEnd; t += 30 * 60_000) {
+      const d = new Date(t)
+      const label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+      const overlaps = booked.some((b) => t < b.end && t + durationMs > b.start)
+      slots.push({ time: label, available: !overlaps && t > now })
+    }
+    return slots
+  }, [booked, workingHoursForDate, date, service?.id, service?.duration_min])
 
   const totalPrice = Number(service?.price ?? 0) + addons.reduce((sum, a) => sum + Number(a.price), 0)
 
@@ -136,6 +146,7 @@ export function BookingPage() {
         durationMin: service.duration_min,
         totalPrice,
         addonIds: addons.map((a) => a.id),
+        notes: `Klient: ${guestName}, tel. ${guestPhone}, ${guestEmail}`,
       })
       toast.show({ kind: 'success', title: 'Zgłoszenie wysłane!', body: 'Czekamy na potwierdzenie od salonu.' })
       navigate('/confirmation')
@@ -249,6 +260,11 @@ export function BookingPage() {
                 Wybierz godzinę
                 <span className="text-sm font-normal text-gray-400 ml-2">· {service.duration_min} min</span>
               </h2>
+              {availableSlots.length === 0 && (
+                <p className="text-center text-gray-400 py-8">
+                  Salon jest nieczynny w wybranym dniu — wybierz inną datę.
+                </p>
+              )}
               <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
                 {availableSlots.map(({ time: t, available }) => (
                   <button

@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { MapPin, Clock, BadgeCheck, ChevronLeft, ChevronRight, ArrowRight, Loader2 } from 'lucide-react'
+import { MapPin, Clock, BadgeCheck, ChevronLeft, ChevronRight, ArrowRight, Loader2, Star, MessageSquare } from 'lucide-react'
 import { StarRating } from '../components/ui/StarRating'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { ProviderMap } from '../components/ui/ProviderMap'
 import { useBookingStore } from '../store/bookingStore'
 import { useAsync } from '../hooks/useAsync'
-import { getProvider } from '../lib/api'
+import { getProvider, listProviderReviews } from '../lib/api'
 import type { WorkingDay } from '../lib/database.types'
 
 const DAYS = ['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Nd']
@@ -25,6 +25,7 @@ export function ServiceDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { data: provider, loading } = useAsync(() => (id ? getProvider(id) : Promise.resolve(null)), [id])
+  const { data: reviews } = useAsync(() => (id ? listProviderReviews(id) : Promise.resolve([])), [id])
   const [imgIdx, setImgIdx] = useState(0)
   const [selectedService, setSelectedService] = useState<string | null>(null)
   const { setProvider, setService } = useBookingStore()
@@ -186,6 +187,40 @@ export function ServiceDetailPage() {
               />
             </div>
           )}
+
+          {/* Opinie */}
+          <div className="bg-white rounded-2xl p-6 card-shadow">
+            <h2 className="font-bold text-xl text-gray-900 mb-4 flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-brand-600" />
+              Opinie ({reviews?.length ?? 0})
+            </h2>
+            {!reviews || reviews.length === 0 ? (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                Brak opinii — bądź pierwszą osobą, która oceni to miejsce po wizycie.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {reviews.map((r) => (
+                  <div key={r.id} className="border-b border-gray-100 last:border-0 pb-4 last:pb-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-medium text-gray-900 text-sm">{r.authorName}</span>
+                      <span className="flex items-center gap-2">
+                        <span className="flex">
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <Star key={n} className={`w-3.5 h-3.5 ${n <= r.rating ? 'text-amber-400 fill-amber-400' : 'text-gray-200'}`} />
+                          ))}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {new Date(r.created_at).toLocaleDateString('pl-PL', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </span>
+                      </span>
+                    </div>
+                    {r.comment && <p className="text-sm text-gray-600 leading-relaxed">{r.comment}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Godziny pracy */}
           <div className="bg-white rounded-2xl p-6 card-shadow">

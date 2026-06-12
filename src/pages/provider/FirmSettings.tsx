@@ -7,7 +7,7 @@ import { CATEGORIES } from '../../data/mock'
 import type { ProviderWithServices } from '../../lib/api'
 import {
   updateProvider, createService, updateService, deleteService,
-  createAddon, deleteAddon, uploadProviderImage,
+  createAddon, deleteAddon, uploadProviderImage, createProvider,
 } from '../../lib/api'
 import type { ServiceCategory, WorkingHours } from '../../lib/database.types'
 
@@ -22,6 +22,89 @@ const DAYS: { key: keyof WorkingHours; label: string }[] = [
 ]
 
 const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-400 text-gray-800 text-sm'
+
+const DEFAULT_HOURS: WorkingHours = {
+  mon: { open: '09:00', close: '18:00' },
+  tue: { open: '09:00', close: '18:00' },
+  wed: { open: '09:00', close: '18:00' },
+  thu: { open: '09:00', close: '18:00' },
+  fri: { open: '09:00', close: '18:00' },
+  sat: null,
+  sun: null,
+}
+
+// Onboarding form shown in the provider dashboard when the user has no firm yet
+export function CreateFirmForm({ onCreated }: { onCreated: () => void }) {
+  const toast = useToast()
+  const [name, setName] = useState('')
+  const [category, setCategory] = useState<ServiceCategory>('hair')
+  const [description, setDescription] = useState('')
+  const [address, setAddress] = useState('')
+  const [city, setCity] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  const submit = async () => {
+    if (!name.trim() || !address.trim() || !city.trim()) {
+      toast.show({ kind: 'error', title: 'Nazwa, adres i miasto są wymagane' })
+      return
+    }
+    setCreating(true)
+    try {
+      await createProvider({
+        name: name.trim(),
+        category,
+        description: description.trim() || undefined,
+        address: address.trim(),
+        city: city.trim(),
+        working_hours: DEFAULT_HOURS,
+      })
+      toast.show({ kind: 'success', title: 'Firma utworzona!', body: 'Dodaj usługi w zakładce „Firma", aby klienci mogli rezerwować.' })
+      onCreated()
+    } catch (e) {
+      toast.show({ kind: 'error', title: 'Nie udało się utworzyć firmy', body: e instanceof Error ? e.message : '' })
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="max-w-lg mx-auto bg-white rounded-2xl p-8 card-shadow">
+      <h2 className="text-xl font-bold text-gray-900 mb-1">Załóż profil swojej firmy</h2>
+      <p className="text-sm text-gray-500 mb-6">
+        Uzupełnij podstawowe dane — usługi, zdjęcia i godziny otwarcia dodasz później w zakładce „Firma".
+      </p>
+      <div className="space-y-4">
+        <div>
+          <label className="text-sm font-medium text-gray-700 mb-1.5 block">Nazwa firmy</label>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Studio Kowalska Hair" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-sm font-medium text-gray-700 mb-1.5 block">Kategoria</label>
+          <select value={category} onChange={(e) => setCategory(e.target.value as ServiceCategory)} className={inputCls}>
+            {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium text-gray-700 mb-1.5 block">Adres</label>
+            <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="ul. Piękna 12" className={inputCls} />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-gray-700 mb-1.5 block">Miasto</label>
+            <input type="text" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Warszawa" className={inputCls} />
+          </div>
+        </div>
+        <div>
+          <label className="text-sm font-medium text-gray-700 mb-1.5 block">Opis <span className="text-gray-400 font-normal">(opcjonalnie)</span></label>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className={inputCls} />
+        </div>
+        <Button fullWidth size="lg" onClick={submit} loading={creating}>
+          <Plus className="w-4 h-4" /> Utwórz firmę
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 export function FirmSettings({ provider, onSaved }: { provider: ProviderWithServices; onSaved: () => void }) {
   const toast = useToast()

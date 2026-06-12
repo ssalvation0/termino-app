@@ -39,10 +39,10 @@ export function Footer() {
           <div>
             <h4 className="text-white font-semibold mb-3 text-sm">Informacje</h4>
             <ul className="space-y-2 text-sm">
-              <li><span className="hover:text-white transition-colors cursor-pointer">O nas</span></li>
-              <li><span className="hover:text-white transition-colors cursor-pointer">Polityka prywatności</span></li>
-              <li><span className="hover:text-white transition-colors cursor-pointer">Regulamin</span></li>
-              <li><span className="hover:text-white transition-colors cursor-pointer">Kontakt</span></li>
+              <li><span>O nas</span></li>
+              <li><span>Polityka prywatności</span></li>
+              <li><span>Regulamin</span></li>
+              <li><a href="mailto:kontakt@termino.pl" className="hover:text-white transition-colors">Kontakt</a></li>
             </ul>
           </div>
         </div>
