@@ -1,14 +1,14 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Calendar, Clock, X, Loader2, AlertCircle } from 'lucide-react'
+import { Calendar, Clock, X, Loader2, AlertCircle, Pencil, Camera, Check } from 'lucide-react'
 import { StatusBadge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import type { BookingStatus } from '../lib/database.types'
 import { clsx } from 'clsx'
 import { useAuthStore } from '../store/authStore'
 import { useAsync } from '../hooks/useAsync'
-import { listMyBookings, updateBookingStatus } from '../lib/api'
+import { listMyBookings, updateBookingStatus, updateProfile, uploadAvatar } from '../lib/api'
 import { useToast } from '../components/ui/Toast'
 
 const TABS: { key: BookingStatus | 'all'; label: string }[] = [
@@ -30,8 +30,16 @@ function formatTime(iso: string) {
 export function ProfilePage() {
   const navigate = useNavigate()
   const toast = useToast()
-  const { session, profile, loading: authLoading } = useAuthStore()
+  const { session, profile, loading: authLoading, refreshProfile } = useAuthStore()
   const [tab, setTab] = useState<BookingStatus | 'all'>('all')
+
+  // Profile editing
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const { data: bookingsRaw, loading, refetch } = useAsync(
     () => (session ? listMyBookings() : Promise.resolve([])),
@@ -45,6 +53,52 @@ export function ProfilePage() {
     total: bookings.length,
     completed: bookings.filter((b) => b.status === 'completed').length,
     upcoming: bookings.filter((b) => b.status === 'confirmed' || b.status === 'pending').length,
+  }
+
+  const startEdit = () => {
+    if (!profile) return
+    setEditName(profile.name)
+    setEditPhone(profile.phone ?? '')
+    setEditing(true)
+  }
+
+  const saveEdit = async () => {
+    if (!editName.trim()) {
+      toast.show({ kind: 'error', title: 'Imię nie może być puste' })
+      return
+    }
+    setSaving(true)
+    try {
+      await updateProfile({ name: editName.trim(), phone: editPhone.trim() || null })
+      await refreshProfile()
+      toast.show({ kind: 'success', title: 'Profil zaktualizowany' })
+      setEditing(false)
+    } catch (e) {
+      toast.show({ kind: 'error', title: 'Nie udało się zapisać', body: e instanceof Error ? e.message : '' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onAvatarPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      toast.show({ kind: 'error', title: 'Plik za duży', body: 'Maksymalny rozmiar zdjęcia to 2 MB.' })
+      return
+    }
+    setUploadingAvatar(true)
+    try {
+      const url = await uploadAvatar(file)
+      await updateProfile({ avatar_url: url })
+      await refreshProfile()
+      toast.show({ kind: 'success', title: 'Zdjęcie zaktualizowane' })
+    } catch (err) {
+      toast.show({ kind: 'error', title: 'Nie udało się wgrać zdjęcia', body: err instanceof Error ? err.message : '' })
+    } finally {
+      setUploadingAvatar(false)
+    }
   }
 
   const cancel = async (id: string) => {
@@ -77,16 +131,76 @@ export function ProfilePage() {
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
       {/* Header */}
       <div className="flex items-center gap-5 mb-8">
-        <div className="w-16 h-16 gradient-brand rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg">
-          {profile.name[0]?.toUpperCase()}
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{profile.name}</h1>
-          <p className="text-gray-500 text-sm">
-            {session.user.email}
-            {profile.phone && <> · {profile.phone}</>}
-          </p>
-        </div>
+        {/* Avatar — click to change */}
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={uploadingAvatar}
+          className="relative w-16 h-16 rounded-2xl overflow-hidden shadow-lg group flex-shrink-0 cursor-pointer"
+          title="Zmień zdjęcie profilowe"
+        >
+          {profile.avatar_url ? (
+            <img src={profile.avatar_url} alt={profile.name} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full gradient-brand flex items-center justify-center text-white text-2xl font-bold">
+              {profile.name[0]?.toUpperCase()}
+            </div>
+          )}
+          <div className={clsx(
+            'absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity',
+            uploadingAvatar ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          )}>
+            {uploadingAvatar
+              ? <Loader2 className="w-5 h-5 text-white animate-spin" />
+              : <Camera className="w-5 h-5 text-white" />}
+          </div>
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onAvatarPick} />
+
+        {editing ? (
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-col sm:flex-row gap-2 max-w-md">
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Imię i nazwisko"
+                className="flex-1 px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-400 text-gray-900 font-semibold"
+              />
+              <input
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                placeholder="+48 600 000 000"
+                className="flex-1 px-3 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-400 text-gray-900"
+              />
+            </div>
+            <div className="flex gap-2 mt-2">
+              <Button size="sm" onClick={saveEdit} loading={saving} className="gap-1">
+                <Check className="w-3.5 h-3.5" /> Zapisz
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving}>
+                Anuluj
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-gray-900 truncate">{profile.name}</h1>
+              <button
+                onClick={startEdit}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors flex-shrink-0"
+                title="Edytuj profil"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-gray-500 text-sm">
+              {session.user.email}
+              {profile.phone && <> · {profile.phone}</>}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Stats */}

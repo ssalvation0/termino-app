@@ -41,14 +41,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // Remove any prior subscription (defensive)
       authSubscription?.unsubscribe()
-      const { data } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      // The callback MUST stay synchronous: supabase-js holds an internal auth
+      // lock while dispatching events, and any supabase query awaited inside
+      // the callback waits on that same lock — deadlocking every request in
+      // the app until reload (fires on TOKEN_REFRESHED too, so it looked like
+      // random hangs). Profile fetch is deferred past the lock via setTimeout.
+      const { data } = supabase.auth.onAuthStateChange((event, newSession) => {
         // On SIGNED_OUT we already cleared state in signOut(); skip duplicate work
         if (event === 'SIGNED_OUT') {
           set({ session: null, user: null, profile: null })
           return
         }
-        const newProfile = newSession?.user ? await fetchProfile(newSession.user.id) : null
-        set({ session: newSession, user: newSession?.user ?? null, profile: newProfile })
+        set({ session: newSession, user: newSession?.user ?? null })
+        const userId = newSession?.user?.id
+        if (!userId) {
+          set({ profile: null })
+          return
+        }
+        // Skip refetch when the profile is already loaded for this user
+        // (TOKEN_REFRESHED fires periodically and on tab refocus).
+        if (get().profile?.id === userId) return
+        setTimeout(() => {
+          fetchProfile(userId).then((profile) => {
+            if (get().user?.id === userId) set({ profile })
+          })
+        }, 0)
       })
       authSubscription = data.subscription
     })()

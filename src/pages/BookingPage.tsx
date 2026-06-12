@@ -351,7 +351,23 @@ export function BookingPage() {
               </div>
               <div className="flex items-start gap-2 mt-4 p-3 bg-brand-50 rounded-xl">
                 <User className="w-4 h-4 text-brand-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-brand-700">Rezerwujesz jako gość. <span className="underline cursor-pointer">Zaloguj się</span> by zarządzać rezerwacjami.</p>
+                {session ? (
+                  <p className="text-xs text-brand-700">
+                    Rezerwujesz jako <span className="font-semibold">{profile?.name ?? session.user.email}</span>.
+                  </p>
+                ) : (
+                  <p className="text-xs text-brand-700">
+                    Rezerwujesz jako gość.{' '}
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/auth?mode=login&next=${encodeURIComponent(window.location.pathname + window.location.search)}`)}
+                      className="underline cursor-pointer"
+                    >
+                      Zaloguj się
+                    </button>{' '}
+                    by zarządzać rezerwacjami.
+                  </p>
+                )}
               </div>
             </div>
           )}

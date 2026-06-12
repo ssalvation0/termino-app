@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { ProviderRow, ServiceRow, AddonRow, BookingRow, BookingStatus, ServiceCategory } from './database.types'
+import type { ProviderRow, ServiceRow, AddonRow, BookingRow, BookingStatus, ServiceCategory, WorkingHours } from './database.types'
 
 // ── Providers ───────────────────────────────────────────────────────────────
 export interface ProviderWithServices extends ProviderRow {
@@ -8,7 +8,9 @@ export interface ProviderWithServices extends ProviderRow {
 }
 
 function shapeProvider(row: any): ProviderWithServices {
-  const services = (row.services ?? []) as (ServiceRow & { addons: AddonRow[] })[]
+  // Deactivated services are soft-deleted (bookings may still reference them)
+  const services = ((row.services ?? []) as (ServiceRow & { addons: AddonRow[] })[])
+    .filter((s) => s.active)
   const priceFrom = services.length ? Math.min(...services.map((s) => Number(s.price))) : 0
   return { ...row, services, priceFrom }
 }
@@ -54,6 +56,103 @@ export async function getMyProviders(): Promise<ProviderWithServices[]> {
     .eq('owner_id', user.id) as any
   if (error) throw error
   return ((data ?? []) as any[]).map(shapeProvider)
+}
+
+// ── Provider management (owner only — enforced by RLS) ─────────────────────
+export async function updateProvider(
+  id: string,
+  input: Partial<Pick<ProviderRow, 'name' | 'category' | 'description' | 'address' | 'city' | 'images' | 'tags'> & { working_hours: WorkingHours }>,
+): Promise<void> {
+  const { error } = await (supabase.from('providers') as any).update(input).eq('id', id)
+  if (error) throw error
+}
+
+export async function createService(input: {
+  providerId: string
+  name: string
+  description?: string
+  durationMin: number
+  price: number
+}): Promise<ServiceRow> {
+  const { data, error } = await (supabase.from('services') as any)
+    .insert({
+      provider_id: input.providerId,
+      name: input.name,
+      description: input.description ?? null,
+      duration_min: input.durationMin,
+      price: input.price,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data as ServiceRow
+}
+
+export async function updateService(
+  id: string,
+  input: Partial<Pick<ServiceRow, 'name' | 'description' | 'duration_min' | 'price'>>,
+): Promise<void> {
+  const { error } = await (supabase.from('services') as any).update(input).eq('id', id)
+  if (error) throw error
+}
+
+// Hard delete when possible; bookings reference services with ON DELETE
+// RESTRICT, so a service with booking history is deactivated instead.
+export async function deleteService(id: string): Promise<void> {
+  const { error } = await supabase.from('services').delete().eq('id', id)
+  if (!error) return
+  if (error.code === '23503') {
+    const { error: updError } = await (supabase.from('services') as any).update({ active: false }).eq('id', id)
+    if (updError) throw updError
+    return
+  }
+  throw error
+}
+
+export async function createAddon(input: { serviceId: string; name: string; price: number }): Promise<AddonRow> {
+  const { data, error } = await (supabase.from('addons') as any)
+    .insert({ service_id: input.serviceId, name: input.name, price: input.price })
+    .select()
+    .single()
+  if (error) throw error
+  return data as AddonRow
+}
+
+export async function deleteAddon(id: string): Promise<void> {
+  const { error } = await supabase.from('addons').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Reuses the public `avatars` bucket — its policies allow any file under the
+// caller's own <uid>/ folder.
+export async function uploadProviderImage(file: File): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Musisz być zalogowany.')
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const path = `${user.id}/firm-${Date.now()}.${ext}`
+  const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
+  if (error) throw error
+  return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl
+}
+
+// ── Profile ─────────────────────────────────────────────────────────────────
+export async function updateProfile(input: { name?: string; phone?: string | null; avatar_url?: string }): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Musisz być zalogowany.')
+  const { error } = await (supabase.from('profiles') as any).update(input).eq('id', user.id)
+  if (error) throw error
+}
+
+// Uploads to the public `avatars` bucket and returns the public URL.
+// Unique filename per upload avoids stale CDN/browser cache on the old URL.
+export async function uploadAvatar(file: File): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Musisz być zalogowany.')
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const path = `${user.id}/${Date.now()}.${ext}`
+  const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
+  if (error) throw error
+  return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl
 }
 
 // ── Bookings ────────────────────────────────────────────────────────────────

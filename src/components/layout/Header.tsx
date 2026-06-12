@@ -52,9 +52,13 @@ export function Header() {
                 onClick={() => setMenuOpen(!menuOpen)}
                 className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-gray-100 transition-colors"
               >
-                <div className="w-8 h-8 gradient-brand rounded-full flex items-center justify-center">
-                  <User className="w-4 h-4 text-white" />
-                </div>
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                ) : (
+                  <div className="w-8 h-8 gradient-brand rounded-full flex items-center justify-center">
+                    <User className="w-4 h-4 text-white" />
+                  </div>
+                )}
                 <span className="hidden sm:block text-sm font-medium text-gray-700">
                   {profile?.name?.split(' ')[0] ?? 'Konto'}
                 </span>

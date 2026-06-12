@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { CheckCircle, Calendar, Clock, ArrowRight } from 'lucide-react'
@@ -9,7 +9,10 @@ import { Button } from '../components/ui/Button'
 
 export function ConfirmationPage() {
   const navigate = useNavigate()
-  const { providerId, serviceId, date, time, addons, reset } = useBookingStore()
+  // Snapshot booking data at mount: the store is reset right after, and under
+  // StrictMode effects run twice, so rendering live store state would wipe the
+  // page (reset-in-cleanup cleared everything before the second effect run).
+  const [{ providerId, serviceId, date, time, addons }] = useState(() => useBookingStore.getState())
 
   const { data: provider } = useAsync(
     () => (providerId ? getProvider(providerId) : Promise.resolve(null)),
@@ -22,7 +25,8 @@ export function ConfirmationPage() {
       navigate('/', { replace: true })
       return
     }
-    return () => { reset() }
+    // Data is captured in the snapshot above — safe to clear for the next booking
+    useBookingStore.getState().reset()
   }, [])
 
   return (

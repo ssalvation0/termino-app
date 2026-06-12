@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, Calendar, BarChart3, TrendingUp, Clock, CheckCircle, AlertCircle, Loader2, Building2 } from 'lucide-react'
+import { LayoutDashboard, Calendar, BarChart3, TrendingUp, Clock, CheckCircle, AlertCircle, Loader2, Building2, Settings } from 'lucide-react'
 import { StatusBadge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { useToast } from '../../components/ui/Toast'
@@ -10,15 +10,17 @@ import { useAuthStore } from '../../store/authStore'
 import { useAsync } from '../../hooks/useAsync'
 import { getMyProviders, listProviderBookings, updateBookingStatus } from '../../lib/api'
 import type { BookingWithJoins } from '../../lib/api'
+import { FirmSettings } from './FirmSettings'
 import { supabase } from '../../lib/supabase'
 
-type Tab = 'overview' | 'calendar' | 'bookings' | 'analytics'
+type Tab = 'overview' | 'calendar' | 'bookings' | 'analytics' | 'firm'
 
 const TABS: { key: Tab; icon: typeof LayoutDashboard; label: string }[] = [
   { key: 'overview', icon: LayoutDashboard, label: 'Przegląd' },
   { key: 'calendar', icon: Calendar, label: 'Kalendarz' },
   { key: 'bookings', icon: CheckCircle, label: 'Rezerwacje' },
   { key: 'analytics', icon: BarChart3, label: 'Analityka' },
+  { key: 'firm', icon: Settings, label: 'Firma' },
 ]
 
 const HOURS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00']
@@ -161,7 +163,7 @@ export function ProviderDashboard() {
   const { session, profile, loading: authLoading } = useAuthStore()
   const [tab, setTab] = useState<Tab>('overview')
 
-  const { data: providersRaw, loading: provLoading } = useAsync(
+  const { data: providersRaw, loading: provLoading, refetch: refetchProviders } = useAsync(
     () => (session ? getMyProviders() : Promise.resolve([])),
     [session?.user.id],
   )
@@ -315,6 +317,7 @@ export function ProviderDashboard() {
         {tab === 'calendar' && <CalendarView bookings={bookings} />}
         {tab === 'bookings' && <BookingsTable bookings={bookings} onAction={refetch} onToast={(msg, kind) => toast.show({ kind, title: msg })} />}
         {tab === 'analytics' && <Analytics bookings={bookings} />}
+        {tab === 'firm' && <FirmSettings key={provider.id} provider={provider} onSaved={refetchProviders} />}
       </motion.div>
     </div>
   )
