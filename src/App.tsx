@@ -18,7 +18,7 @@ export default function App() {
 
   return (
     <ToastProvider>
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<LandingPage />} />
